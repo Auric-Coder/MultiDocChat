@@ -1,0 +1,17 @@
+langchain
+langchain-community
+langchain-chroma
+langchain-text-splitters
+chromadb
+streamlit
+langchain-openai
+pypdf
+docx2txt
+python-docx
+tiktoken
+python-dotenv
+
+# Provided by the shared launchpad Conda environment:
+# torch
+# transformers
+# sentence-transformers
