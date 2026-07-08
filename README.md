@@ -14,8 +14,22 @@ This phase provides the initial ingestion pipeline:
   detected
 - Central embedding factory using local embeddings by default
 
-Vector storage, retrieval, chains, conflict detection, and session memory will be
-expanded in later phases.
+## Phase 2
+
+This phase adds local ChromaDB retrieval:
+
+- Upload batches are embedded with
+  `sentence-transformers/all-MiniLM-L6-v2` through `get_embedding_function("local")`
+- Chroma persist directories include the provider name (`chroma_db_local`) so local
+  384-dimensional MiniLM vectors stay physically separate from future OpenAI vectors
+- The Streamlit app creates a fresh temporary local Chroma store whenever the upload
+  batch changes
+- `ingestion.vectorstore.get_retriever(k=4)` exposes the active retriever for later
+  chains
+- Chat input currently runs a manual similarity search and displays relevant chunks
+  with source metadata
+
+Chains, conflict detection, and session memory will be expanded in later phases.
 
 ## Run
 
@@ -45,4 +59,10 @@ Inspect chunk attribution before vector storage:
 
 ```bash
 python -m ingestion.loaders samples\example.pdf samples\notes.md samples\brief.docx
+```
+
+Embed files into local Chroma and run a manual similarity search:
+
+```bash
+python -m ingestion.vectorstore "What does the policy say about invoices?" samples\example.pdf
 ```
