@@ -29,7 +29,19 @@ This phase adds local ChromaDB retrieval:
 - Chat input currently runs a manual similarity search and displays relevant chunks
   with source metadata
 
-Chains, conflict detection, and session memory will be expanded in later phases.
+## Phase 3
+
+This phase adds retrieval QA with source attribution:
+
+- Chat questions retrieve the top matching Chroma chunks and pass them to a custom
+  QA prompt labeled by `source_file` and page or section metadata
+- The model is instructed to answer only from the provided excerpts and cite each
+  factual statement inline as `[filename — section/page]`
+- Inline citations are parsed back into structured source records
+- The Streamlit response includes an expandable Sources panel with the exact file,
+  page or section, chunk ID, and excerpt text used for the answer
+
+Conflict detection and session memory will be expanded in later phases.
 
 ## Run
 

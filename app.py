@@ -2,11 +2,12 @@
 
 import streamlit as st
 
+from chains.qa_chain import answer_question
 from ingestion.loaders import process_uploaded_files
 from ingestion.vectorstore import (
     create_vector_store,
+    get_vector_store,
     make_temp_persist_directory,
-    similarity_search,
 )
 
 
@@ -27,6 +28,14 @@ def _upload_signature(files):
     return tuple((file.name, getattr(file, "size", None)) for file in files)
 
 
+def _vector_store_is_active():
+    try:
+        get_vector_store()
+    except RuntimeError:
+        return False
+    return True
+
+
 if uploaded_files:
     upload_signature = _upload_signature(uploaded_files)
 
@@ -40,6 +49,11 @@ if uploaded_files:
             st.session_state.chunks = chunks
             st.session_state.chunk_count = len(chunks)
             st.session_state.persist_directory = persist_directory
+        elif not _vector_store_is_active():
+            create_vector_store(
+                st.session_state.chunks,
+                persist_directory=st.session_state.persist_directory,
+            )
 
         chunks = st.session_state.chunks
     except Exception as exc:
@@ -61,12 +75,26 @@ if prompt:
         if "persist_directory" not in st.session_state:
             st.write("Upload documents first, then ask a question.")
         else:
-            results = similarity_search(prompt, k=4)
-            if not results:
-                st.write("No matching chunks found.")
+            try:
+                result = answer_question(prompt, k=4)
+            except Exception as exc:
+                st.error(f"Could not generate an answer: {exc}")
             else:
-                st.write("Most relevant chunks:")
-                for index, result in enumerate(results, start=1):
-                    st.markdown(f"**Result {index}**")
-                    st.json(result.metadata)
-                    st.write(" ".join(result.page_content.split())[:700])
+                st.write(result.answer)
+
+                sources_to_show = result.sources or result.retrieved_sources
+                with st.expander("Sources"):
+                    if result.sources:
+                        st.caption("Excerpts cited in the answer.")
+                    elif result.retrieved_sources:
+                        st.caption(
+                            "No inline citations were parsed, so showing the "
+                            "retrieved excerpts used as context."
+                        )
+                    else:
+                        st.write("No source excerpts found.")
+
+                    for index, source in enumerate(sources_to_show, start=1):
+                        st.markdown(f"**{index}. {source.citation}**")
+                        st.caption(f"Chunk ID: {source.chunk_id}")
+                        st.write(source.excerpt[:900])

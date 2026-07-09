@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-import tempfile
+from io import BytesIO
 from pathlib import Path
 from typing import Iterable, List, Optional, Protocol
 
@@ -54,6 +54,26 @@ def _docx_headings(file_path: str) -> list[tuple[int, str]]:
     headings: list[tuple[int, str]] = []
     cursor = 0
     doc = DocxDocument(file_path)
+
+    for paragraph in doc.paragraphs:
+        text = paragraph.text or ""
+        style_name = paragraph.style.name if paragraph.style else ""
+        if text.strip() and style_name.lower().startswith("heading"):
+            headings.append((cursor, _normalize_heading(text)))
+        cursor += len(text) + 1
+
+    return headings
+
+
+def _docx_headings_from_bytes(file_bytes: bytes) -> list[tuple[int, str]]:
+    try:
+        from docx import Document as DocxDocument
+    except ImportError:
+        return []
+
+    headings: list[tuple[int, str]] = []
+    cursor = 0
+    doc = DocxDocument(BytesIO(file_bytes))
 
     for paragraph in doc.paragraphs:
         text = paragraph.text or ""
@@ -157,29 +177,85 @@ def load_and_chunk(file_path: str) -> List[Document]:
     )
 
 
-def _write_uploaded_file(uploaded_file: UploadedFile, directory: str) -> str:
-    safe_name = Path(uploaded_file.name).name
-    destination = Path(directory) / safe_name
-    destination.write_bytes(uploaded_file.getbuffer())
-    return str(destination)
+def _load_pdf_bytes(file_bytes: bytes, source_file: str) -> List[Document]:
+    from pypdf import PdfReader
+
+    reader = PdfReader(BytesIO(file_bytes))
+    docs: list[Document] = []
+
+    for page_index, page in enumerate(reader.pages):
+        docs.append(
+            Document(
+                page_content=page.extract_text() or "",
+                metadata={"page": page_index},
+            )
+        )
+
+    chunks = _splitter().split_documents(docs)
+    return _apply_common_metadata(chunks, source_file=source_file)
+
+
+def _load_docx_bytes(file_bytes: bytes, source_file: str) -> List[Document]:
+    from docx import Document as DocxDocument
+
+    docx = DocxDocument(BytesIO(file_bytes))
+    text = "\n".join(paragraph.text for paragraph in docx.paragraphs)
+    docs = [Document(page_content=text, metadata={})]
+    chunks = _splitter().split_documents(docs)
+    return _apply_common_metadata(
+        chunks,
+        source_file=source_file,
+        section_headings=_docx_headings_from_bytes(file_bytes),
+    )
+
+
+def _load_text_bytes(file_bytes: bytes, source_file: str) -> List[Document]:
+    text = file_bytes.decode("utf-8")
+    docs = [Document(page_content=text, metadata={})]
+    chunks = _splitter().split_documents(docs)
+    return _apply_common_metadata(chunks, source_file=source_file)
+
+
+def _load_markdown_bytes(file_bytes: bytes, source_file: str) -> List[Document]:
+    text = file_bytes.decode("utf-8")
+    docs = [Document(page_content=text, metadata={})]
+    chunks = _splitter().split_documents(docs)
+    return _apply_common_metadata(
+        chunks,
+        source_file=source_file,
+        section_headings=_markdown_headings(text),
+    )
+
+
+def load_uploaded_file(uploaded_file: UploadedFile) -> List[Document]:
+    """Load a Streamlit upload from bytes so no temporary path is needed later."""
+
+    source_file = Path(uploaded_file.name).name
+    extension = Path(source_file).suffix.lower()
+    file_bytes = bytes(uploaded_file.getbuffer())
+
+    if extension == ".pdf":
+        return _load_pdf_bytes(file_bytes, source_file)
+    if extension == ".docx":
+        return _load_docx_bytes(file_bytes, source_file)
+    if extension == ".md":
+        return _load_markdown_bytes(file_bytes, source_file)
+    if extension == ".txt":
+        return _load_text_bytes(file_bytes, source_file)
+
+    raise ValueError(
+        f"Unsupported file type for '{uploaded_file.name}'. Supported: "
+        f"{', '.join(sorted(SUPPORTED_EXTENSIONS))}"
+    )
 
 
 def process_uploaded_files(files: List[UploadedFile]) -> List[Document]:
-    """Persist Streamlit uploads briefly, then load and chunk them."""
+    """Load and chunk Streamlit uploads without persisting temporary source paths."""
 
     all_chunks: list[Document] = []
 
-    with tempfile.TemporaryDirectory(prefix="multidocchat_uploads_") as temp_dir:
-        for uploaded_file in files:
-            extension = Path(uploaded_file.name).suffix.lower()
-            if extension not in SUPPORTED_EXTENSIONS:
-                raise ValueError(
-                    f"Unsupported file type for '{uploaded_file.name}'. Supported: "
-                    f"{', '.join(sorted(SUPPORTED_EXTENSIONS))}"
-                )
-
-            temp_path = _write_uploaded_file(uploaded_file, temp_dir)
-            all_chunks.extend(load_and_chunk(temp_path))
+    for uploaded_file in files:
+        all_chunks.extend(load_uploaded_file(uploaded_file))
 
     return all_chunks
 
