@@ -13,7 +13,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from ingestion.vectorstore import similarity_search
+from ingestion.vectorstore import get_retriever_per_source
 
 if TYPE_CHECKING:
     from chains.conflict import ConflictResult
@@ -232,9 +232,13 @@ def answer_question(
     k: int = 4,
     llm: Optional[BaseChatModel] = None,
 ) -> QAResult:
-    """Retrieve top-k chunks and answer with strict inline source citations."""
+    """Retrieve top chunks per source and answer with inline citations.
 
-    docs = similarity_search(question, k=k)
+    ``k`` is the limit for each uploaded source file, not a global limit.
+    """
+
+    retrieve = get_retriever_per_source(k_per_source=k)
+    docs = retrieve(question)
     retrieved_sources = [_source_from_document(doc) for doc in docs]
     if not retrieved_sources:
         return QAResult(

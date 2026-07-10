@@ -6,7 +6,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -177,6 +177,38 @@ def similarity_search(query: str, *, k: int = 4) -> list[Document]:
     """Run a manual similarity search against the active vector store."""
 
     return get_vector_store().similarity_search(query, k=k)
+
+
+def get_retriever_per_source(k_per_source: int = 3) -> Callable[[str], list[Document]]:
+    """Retrieve top chunks independently from each source file, then merge.
+
+    Querying every source separately prevents a file with many chunks from
+    crowding smaller uploaded files out of a single global top-k result.
+    """
+
+    vector_store = get_vector_store()
+    all_metadatas = vector_store.get()["metadatas"]
+    source_files = sorted(
+        {
+            metadata.get("source_file")
+            for metadata in all_metadatas
+            if metadata and metadata.get("source_file")
+        }
+    )
+
+    def retrieve(query: str) -> list[Document]:
+        merged: list[Document] = []
+        for source in source_files:
+            merged.extend(
+                vector_store.similarity_search(
+                    query,
+                    k=k_per_source,
+                    filter={"source_file": source},
+                )
+            )
+        return merged
+
+    return retrieve
 
 
 if __name__ == "__main__":
