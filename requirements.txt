@@ -2,6 +2,7 @@ langchain
 langchain-community
 langchain-chroma
 langchain-google-genai
+langchain-nvidia-ai-endpoints
 langchain-text-splitters
 chromadb
 streamlit

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from dotenv import load_dotenv
 from langchain_core.documents import Document
@@ -15,8 +15,13 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from ingestion.vectorstore import similarity_search
 
+if TYPE_CHECKING:
+    from chains.conflict import ConflictResult
 
-DEFAULT_CHAT_PROVIDER = "gemini"
+
+DEFAULT_CHAT_PROVIDER = "nvidia"
+DEFAULT_NVIDIA_MODEL = "meta/llama-3.3-70b-instruct"
+NVIDIA_REQUEST_TIMEOUT_SECONDS = 120
 DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
 EM_DASH = "\N{EM DASH}"
 CITATION_FORMAT = f"[filename {EM_DASH} section/page]"
@@ -47,6 +52,7 @@ class QAResult:
     answer: str
     sources: list[SourceExcerpt]
     retrieved_sources: list[SourceExcerpt]
+    conflict: ConflictResult | None = None
 
 
 QA_PROMPT = ChatPromptTemplate.from_messages(
@@ -174,6 +180,21 @@ def get_chat_llm(provider: str = DEFAULT_CHAT_PROVIDER) -> BaseChatModel:
 
     load_dotenv()
 
+    if provider == "nvidia":
+        if not os.getenv("NVIDIA_API_KEY"):
+            raise RuntimeError(
+                "NVIDIA_API_KEY is not set. Add it to your environment or local .env "
+                "file."
+            )
+
+        from langchain_nvidia_ai_endpoints import ChatNVIDIA
+
+        return ChatNVIDIA(
+            model=DEFAULT_NVIDIA_MODEL,
+            temperature=0,
+            timeout=NVIDIA_REQUEST_TIMEOUT_SECONDS,
+        )
+
     if provider == "gemini":
         if not os.getenv("GOOGLE_API_KEY"):
             raise RuntimeError(
@@ -231,8 +252,11 @@ def answer_question(
     )
     answer = _message_content(response).strip()
 
+    from chains.conflict import detect_conflict
+
     return QAResult(
         answer=answer,
         sources=_match_cited_sources(answer, retrieved_sources),
         retrieved_sources=retrieved_sources,
+        conflict=detect_conflict(question, retrieved_sources),
     )

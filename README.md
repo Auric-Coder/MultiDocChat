@@ -41,7 +41,20 @@ This phase adds retrieval QA with source attribution:
 - The Streamlit response includes an expandable Sources panel with the exact file,
   page or section, chunk ID, and excerpt text used for the answer
 
-Conflict detection and session memory will be expanded in later phases.
+## Phase 4
+
+This phase checks for conflicting claims across uploaded files. It first uses a
+local, conservative signal (shared topic with different numeric values or
+opposing negation) so the secondary LLM comparison is not run on every
+multi-file query. When triggered, the comparison uses the same
+`get_chat_llm(provider="gemini")` factory as QA and Streamlit shows a distinct
+`⚠️ Sources disagree` callout with each source's position.
+
+Run the focused no-network test with:
+
+```bash
+python -m unittest discover -s tests -v
+```
 
 ## Run
 

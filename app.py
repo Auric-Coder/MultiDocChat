@@ -82,6 +82,13 @@ if prompt:
             else:
                 st.write(result.answer)
 
+                if result.conflict and result.conflict.has_conflict:
+                    st.warning("⚠️ Sources disagree")
+                    st.markdown(
+                        result.conflict.summary
+                        or "\n".join(result.conflict.source_positions())
+                    )
+
                 sources_to_show = result.sources or result.retrieved_sources
                 with st.expander("Sources"):
                     if result.sources:
