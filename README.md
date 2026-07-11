@@ -56,6 +56,14 @@ Run the focused no-network test with:
 python -m unittest discover -s tests -v
 ```
 
+## Phase 5
+
+- Completed question/answer exchanges are held in `st.session_state` as a
+  six-turn window and reset whenever the uploaded document set changes.
+- Before retrieval, follow-up questions are rewritten to standalone search
+  queries using `get_chat_llm(provider="nvidia")`; the answer prompt still
+  receives only the documents retrieved by that rewritten query.
+
 ## Run
 
 Use the existing `launchpad` Conda environment. It already contains the heavy ML

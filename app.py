@@ -9,20 +9,25 @@ from ingestion.vectorstore import (
     get_vector_store,
     make_temp_persist_directory,
 )
+from memory.session import (
+    add_conversation_turn,
+    clear_conversation,
+    format_chat_history,
+    get_conversation_turns,
+    initialize_conversation,
+)
 
 
 st.set_page_config(page_title="MultiDocChat", page_icon="MD")
 
 st.title("MultiDocChat")
+initialize_conversation(st.session_state)
 
 uploaded_files = st.file_uploader(
     "Upload files",
     accept_multiple_files=True,
     type=["pdf", "docx", "txt", "md"],
 )
-
-prompt = st.chat_input("Ask a question about your documents")
-
 
 def _upload_signature(files):
     return tuple((file.name, getattr(file, "size", None)) for file in files)
@@ -49,6 +54,7 @@ if uploaded_files:
             st.session_state.chunks = chunks
             st.session_state.chunk_count = len(chunks)
             st.session_state.persist_directory = persist_directory
+            clear_conversation(st.session_state)
         elif not _vector_store_is_active():
             create_vector_store(
                 st.session_state.chunks,
@@ -67,6 +73,15 @@ if uploaded_files:
                 st.json(chunk.metadata)
                 st.caption(" ".join(chunk.page_content.split())[:300])
 
+
+for turn in get_conversation_turns(st.session_state):
+    with st.chat_message("user"):
+        st.write(turn["question"])
+    with st.chat_message("assistant"):
+        st.write(turn["answer"])
+
+prompt = st.chat_input("Ask a question about your documents")
+
 if prompt:
     with st.chat_message("user"):
         st.write(prompt)
@@ -76,11 +91,18 @@ if prompt:
             st.write("Upload documents first, then ask a question.")
         else:
             try:
-                result = answer_question(prompt, k=4)
+                result = answer_question(
+                    prompt,
+                    k=4,
+                    chat_history=format_chat_history(
+                        get_conversation_turns(st.session_state)
+                    ),
+                )
             except Exception as exc:
                 st.error(f"Could not generate an answer: {exc}")
             else:
                 st.write(result.answer)
+                add_conversation_turn(st.session_state, prompt, result.answer)
 
                 if result.conflict and result.conflict.has_conflict:
                     st.warning("⚠️ Sources disagree")

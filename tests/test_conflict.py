@@ -11,7 +11,7 @@ from chains.qa_chain import SourceExcerpt, _source_from_document
 from ingestion.loaders import load_and_chunk
 
 
-class _FakeGemini:
+class _FakeNvidia:
     def invoke(self, _messages):
         return AIMessage(
             content=(
@@ -23,7 +23,7 @@ class _FakeGemini:
 
 
 class ConflictDetectionTest(TestCase):
-    def test_contradictory_policy_files_trigger_gemini_conflict_call(self):
+    def test_contradictory_policy_files_trigger_nvidia_conflict_call(self):
         root = Path(__file__).resolve().parents[1]
         sources = [
             _source_from_document(document)
@@ -31,12 +31,12 @@ class ConflictDetectionTest(TestCase):
             for document in load_and_chunk(str(path))
         ]
 
-        with patch("chains.qa_chain.get_chat_llm", return_value=_FakeGemini()) as factory:
+        with patch("chains.qa_chain.get_chat_llm", return_value=_FakeNvidia()) as factory:
             result = detect_conflict("What is the monthly internet reimbursement?", sources)
 
         self.assertTrue(result.checked)
         self.assertTrue(result.has_conflict)
-        self.assertEqual(factory.call_args.kwargs, {"provider": "gemini"})
+        self.assertEqual(factory.call_args.kwargs, {"provider": "nvidia"})
         self.assertIn("policy_2025.txt", result.summary)
         self.assertIn("policy_2026.txt", result.summary)
 

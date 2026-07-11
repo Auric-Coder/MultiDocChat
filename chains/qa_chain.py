@@ -75,6 +75,24 @@ QA_PROMPT = ChatPromptTemplate.from_messages(
     ]
 )
 
+QUESTION_CONDENSING_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "Rewrite the user's follow-up into a concise, standalone document "
+            "search query. Resolve references such as pronouns and ordinal terms "
+            "from the conversation history. Do not answer the question, add facts, "
+            "or include citations. Return only the standalone query.",
+        ),
+        (
+            "human",
+            "Conversation history:\n{chat_history}\n\n"
+            "Follow-up question:\n{question}\n\n"
+            "Standalone query:",
+        ),
+    ]
+)
+
 
 def _clean_text(value: object, fallback: str = "") -> str:
     text = "" if value is None else str(value)
@@ -226,19 +244,40 @@ def get_default_llm() -> BaseChatModel:
     return get_chat_llm(DEFAULT_CHAT_PROVIDER)
 
 
+def condense_question(question: str, chat_history: str) -> str:
+    """Resolve a follow-up into a standalone query before document retrieval.
+
+    This deliberately uses the shared NVIDIA factory rather than constructing a
+    separate chat client. With no prior turns there is nothing to resolve, so no
+    extra model call is made.
+    """
+
+    if not chat_history.strip():
+        return question
+
+    messages = QUESTION_CONDENSING_PROMPT.format_messages(
+        question=question,
+        chat_history=chat_history,
+    )
+    response = get_chat_llm(provider="nvidia").invoke(messages)
+    return _message_content(response).strip() or question
+
+
 def answer_question(
     question: str,
     *,
     k: int = 4,
     llm: Optional[BaseChatModel] = None,
+    chat_history: str = "",
 ) -> QAResult:
     """Retrieve top chunks per source and answer with inline citations.
 
     ``k`` is the limit for each uploaded source file, not a global limit.
     """
 
+    standalone_question = condense_question(question, chat_history)
     retrieve = get_retriever_per_source(k_per_source=k)
-    docs = retrieve(question)
+    docs = retrieve(standalone_question)
     retrieved_sources = [_source_from_document(doc) for doc in docs]
     if not retrieved_sources:
         return QAResult(
@@ -262,5 +301,5 @@ def answer_question(
         answer=answer,
         sources=_match_cited_sources(answer, retrieved_sources),
         retrieved_sources=retrieved_sources,
-        conflict=detect_conflict(question, retrieved_sources),
+        conflict=detect_conflict(standalone_question, retrieved_sources),
     )
