@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from langchain_core.documents import Document
 
-from chains.qa_chain import answer_question
+from chains.qa_chain import QA_PROMPT, answer_question
 from ingestion.vectorstore import get_retriever_per_source
 
 
@@ -62,3 +62,25 @@ class PerSourceRetrievalTest(TestCase):
         retriever.assert_called_once_with(k_per_source=3)
         self.assertEqual([source.source_file for source in result.retrieved_sources], ["large_document.txt", "resume.txt"])
         self.assertEqual([source.source_file for source in result.sources], ["resume.txt"])
+
+    def test_enumeration_question_broadens_per_source_retrieval(self):
+        document = Document(
+            page_content="Phase 1 is ingestion.",
+            metadata={"source_file": "roadmap.txt", "chunk_id": "roadmap-1"},
+        )
+        llm = lambda _messages: "Phase 1 is ingestion. [roadmap.txt - chunk roadmap-1]"
+
+        with patch(
+            "chains.qa_chain.get_retriever_per_source",
+            return_value=lambda _query: [document],
+        ) as retriever:
+            with patch("chains.conflict.detect_conflict", return_value=None):
+                answer_question("List all phases.", k=5, llm=llm)
+
+        retriever.assert_called_once_with(k_per_source=20)
+
+    def test_qa_prompt_instructs_file_level_source_deduplication(self):
+        system_message = QA_PROMPT.messages[0].prompt.template
+
+        self.assertIn("treat them as one source", system_message)
+        self.assertIn("Group your citation by unique file", system_message)

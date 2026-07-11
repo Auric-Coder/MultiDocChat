@@ -36,7 +36,7 @@ class ConflictDetectionTest(TestCase):
 
         self.assertTrue(result.checked)
         self.assertTrue(result.has_conflict)
-        self.assertEqual(factory.call_args.kwargs, {"provider": "nvidia"})
+        self.assertEqual(factory.call_args.kwargs, {})
         self.assertIn("policy_2025.txt", result.summary)
         self.assertIn("policy_2026.txt", result.summary)
 

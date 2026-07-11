@@ -167,7 +167,7 @@ def get_vector_store() -> Chroma:
     return _VECTOR_STORE
 
 
-def get_retriever(k: int = 4):
+def get_retriever(k: int = 8):
     """Return the active vector store retriever for downstream chains."""
 
     return get_vector_store().as_retriever(search_kwargs={"k": k})
@@ -179,7 +179,7 @@ def similarity_search(query: str, *, k: int = 4) -> list[Document]:
     return get_vector_store().similarity_search(query, k=k)
 
 
-def get_retriever_per_source(k_per_source: int = 3) -> Callable[[str], list[Document]]:
+def get_retriever_per_source(k_per_source: int = 5) -> Callable[[str], list[Document]]:
     """Retrieve top chunks independently from each source file, then merge.
 
     Querying every source separately prevents a file with many chunks from

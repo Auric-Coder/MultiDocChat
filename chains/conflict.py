@@ -178,7 +178,7 @@ def detect_conflict(question: str, sources: list[SourceLike]) -> ConflictResult:
         question=question,
         excerpts=_format_excerpts(grouped),
     )
-    response = get_chat_llm(provider="nvidia").invoke(messages)
+    response = get_chat_llm().invoke(messages)
     summary = _message_content(response).strip()
     has_conflict = not summary.upper().startswith("CONFLICT: NO")
     if summary.upper().startswith("CONFLICT: YES"):

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 DEFAULT_CHAT_PROVIDER = "nvidia"
-DEFAULT_NVIDIA_MODEL = "meta/llama-3.3-70b-instruct"
+DEFAULT_NVIDIA_MODEL = "meta/llama-3.1-8b-instruct"
 NVIDIA_REQUEST_TIMEOUT_SECONDS = 120
 DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
 EM_DASH = "\N{EM DASH}"
@@ -29,6 +29,10 @@ SOURCE_SEPARATOR = f" {EM_DASH} "
 CITATION_PATTERN = re.compile(
     r"\[([^\[\]]+?)\s+(?:" + re.escape(EM_DASH) + r"|-)\s+([^\[\]]+?)\]"
 )
+ENUMERATION_QUERY_PATTERN = re.compile(
+    r"\b(?:list|all|every|summary|summarize)\b", re.IGNORECASE
+)
+ENUMERATION_K_PER_SOURCE = 20
 
 
 @dataclass(frozen=True)
@@ -64,7 +68,11 @@ QA_PROMPT = ChatPromptTemplate.from_messages(
             f"cite the source in the format {CITATION_FORMAT}. If the excerpts "
             "don't contain the answer, say so.\n"
             "Do not cite sources that are not present in the excerpts. Keep the "
-            "answer concise and directly relevant to the question.",
+            "answer concise and directly relevant to the question.\n"
+            "When multiple excerpts come from the same source file, treat them as "
+            "one source and synthesize their content together — do not list the "
+            "same file multiple times as if each chunk were a separate source. "
+            "Group your citation by unique file, not by individual chunk.",
         ),
         (
             "human",
@@ -241,7 +249,7 @@ def get_chat_llm(provider: str = DEFAULT_CHAT_PROVIDER) -> BaseChatModel:
 def get_default_llm() -> BaseChatModel:
     """Return the default chat model used for retrieval QA."""
 
-    return get_chat_llm(DEFAULT_CHAT_PROVIDER)
+    return get_chat_llm()
 
 
 def condense_question(question: str, chat_history: str) -> str:
@@ -259,14 +267,22 @@ def condense_question(question: str, chat_history: str) -> str:
         question=question,
         chat_history=chat_history,
     )
-    response = get_chat_llm(provider="nvidia").invoke(messages)
+    response = get_chat_llm().invoke(messages)
     return _message_content(response).strip() or question
+
+
+def _k_per_source_for_question(question: str, normal_k: int) -> int:
+    """Broaden retrieval for questions that ask for document-wide coverage."""
+
+    if ENUMERATION_QUERY_PATTERN.search(question):
+        return max(normal_k, ENUMERATION_K_PER_SOURCE)
+    return normal_k
 
 
 def answer_question(
     question: str,
     *,
-    k: int = 4,
+    k: int = 8,
     llm: Optional[BaseChatModel] = None,
     chat_history: str = "",
 ) -> QAResult:
@@ -276,7 +292,8 @@ def answer_question(
     """
 
     standalone_question = condense_question(question, chat_history)
-    retrieve = get_retriever_per_source(k_per_source=k)
+    k_per_source = _k_per_source_for_question(standalone_question, k)
+    retrieve = get_retriever_per_source(k_per_source=k_per_source)
     docs = retrieve(standalone_question)
     retrieved_sources = [_source_from_document(doc) for doc in docs]
     if not retrieved_sources:
