@@ -10,6 +10,7 @@ from typing import Iterable, Protocol
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
 
+from ingestion.vectorstore import filter_by_relative_relevance
 
 class SourceLike(Protocol):
     """The small portion of a QA source record needed for conflict checks."""
@@ -17,6 +18,7 @@ class SourceLike(Protocol):
     source_file: str
     location: str
     excerpt: str
+    retrieval_distance: float | None
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,25 @@ def group_by_source(sources: Iterable[SourceLike]) -> dict[str, list[SourceLike]
     return dict(grouped)
 
 
+def _relevant_sources(sources: Iterable[SourceLike]) -> list[SourceLike]:
+    """Exclude weak cross-file matches before comparing source positions.
+
+    Sources constructed outside retrieval have no distance, so retain them for
+    backwards compatibility. Retrieved sources carry the L2 distance added by
+    ``get_retriever_per_source`` and are compared relative to the best match.
+    """
+
+    unscored: list[SourceLike] = []
+    scored: list[tuple[SourceLike, float]] = []
+    for source in sources:
+        distance = getattr(source, "retrieval_distance", None)
+        if distance is None:
+            unscored.append(source)
+        else:
+            scored.append((source, float(distance)))
+    return unscored + [source for source, _ in filter_by_relative_relevance(scored)]
+
+
 def _terms(text: str) -> set[str]:
     return {
         match.group(0).lower()
@@ -147,7 +168,7 @@ def _has_disagreement_signal(grouped: dict[str, list[SourceLike]]) -> bool:
 def should_check_conflict(sources: Iterable[SourceLike]) -> bool:
     """Whether multiple retrieved sources have a cheap disagreement signal."""
 
-    grouped = group_by_source(sources)
+    grouped = group_by_source(_relevant_sources(sources))
     return len(grouped) >= 2 and _has_disagreement_signal(grouped)
 
 
@@ -168,6 +189,7 @@ def detect_conflict(question: str, sources: list[SourceLike]) -> ConflictResult:
     secondary call uses the same default provider as retrieval QA.
     """
 
+    sources = _relevant_sources(sources)
     grouped = group_by_source(sources)
     if len(grouped) < 2 or not _has_disagreement_signal(grouped):
         return ConflictResult(checked=False, has_conflict=False, sources=sources)

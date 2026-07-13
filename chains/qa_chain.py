@@ -13,7 +13,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from ingestion.vectorstore import get_retriever_per_source
+from ingestion.vectorstore import RETRIEVAL_DISTANCE_METADATA_KEY, get_retriever_per_source
 
 if TYPE_CHECKING:
     from chains.conflict import ConflictResult
@@ -27,12 +27,18 @@ EM_DASH = "\N{EM DASH}"
 CITATION_FORMAT = f"[filename {EM_DASH} section/page]"
 SOURCE_SEPARATOR = f" {EM_DASH} "
 CITATION_PATTERN = re.compile(
-    r"\[([^\[\]]+?)\s+(?:" + re.escape(EM_DASH) + r"|-)\s+([^\[\]]+?)\]"
+    # Accept the canonical ``[file — location]`` and common model near-misses:
+    # no separator spaces, en dashes, and parentheses instead of square brackets.
+    r"[\[(]\s*([^\[\]()]+?)\s*(?:"
+    + re.escape(EM_DASH)
+    + r"|–|-)\s*([^\[\]()]+?)\s*[\])]"
 )
 ENUMERATION_QUERY_PATTERN = re.compile(
     r"\b(?:list|all|every|summary|summarize)\b", re.IGNORECASE
 )
 ENUMERATION_K_PER_SOURCE = 20
+SUMMARY_MAX_TOKENS = 700
+NVIDIA_FREQUENCY_PENALTY = 0.5
 
 
 @dataclass(frozen=True)
@@ -43,6 +49,7 @@ class SourceExcerpt:
     location: str
     chunk_id: str
     excerpt: str
+    retrieval_distance: float | None = None
 
     @property
     def citation(self) -> str:
@@ -67,8 +74,15 @@ QA_PROMPT = ChatPromptTemplate.from_messages(
             "Only answer using the provided excerpts. For every factual statement, "
             f"cite the source in the format {CITATION_FORMAT}. If the excerpts "
             "don't contain the answer, say so.\n"
+            "CITATIONS ARE REQUIRED. After every factual sentence, copy the exact "
+            "value shown after `Source:` in its supporting excerpt and put it in "
+            f"square brackets exactly like this: {CITATION_FORMAT}. Keep the "
+            "filename and location verbatim; do not omit brackets, replace the "
+            "dash, cite an excerpt number, or invent a source.\n"
             "Do not cite sources that are not present in the excerpts. Keep the "
             "answer concise and directly relevant to the question.\n"
+            "For a request to list or summarize, produce one concise, non-repeating "
+            "bullet list. Do not restate the list, conclusion, or citations.\n"
             "When multiple excerpts come from the same source file, treat them as "
             "one source and synthesize their content together — do not list the "
             "same file multiple times as if each chunk were a separate source. "
@@ -134,6 +148,7 @@ def _source_from_document(doc: Document) -> SourceExcerpt:
         location=_location_from_metadata(metadata),
         chunk_id=_clean_text(metadata.get("chunk_id"), fallback="unknown chunk"),
         excerpt=_clean_text(doc.page_content),
+        retrieval_distance=metadata.get(RETRIEVAL_DISTANCE_METADATA_KEY),
     )
 
 
@@ -196,7 +211,11 @@ def _match_cited_sources(
     ]
 
 
-def get_chat_llm(provider: str = DEFAULT_CHAT_PROVIDER) -> BaseChatModel:
+def get_chat_llm(
+    provider: str = DEFAULT_CHAT_PROVIDER,
+    *,
+    max_tokens: int | None = None,
+) -> BaseChatModel:
     """Return the configured chat model used for retrieval QA.
 
     Chat/generation model selection is independent from the embedding provider.
@@ -215,10 +234,18 @@ def get_chat_llm(provider: str = DEFAULT_CHAT_PROVIDER) -> BaseChatModel:
 
         from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
+        nvidia_options = {
+            "model": DEFAULT_NVIDIA_MODEL,
+            "temperature": 0,
+            "timeout": NVIDIA_REQUEST_TIMEOUT_SECONDS,
+            # NVIDIA's OpenAI-compatible endpoint supports this direct
+            # repetition deterrent for Llama models.
+            "frequency_penalty": NVIDIA_FREQUENCY_PENALTY,
+        }
+        if max_tokens is not None:
+            nvidia_options["max_tokens"] = max_tokens
         return ChatNVIDIA(
-            model=DEFAULT_NVIDIA_MODEL,
-            temperature=0,
-            timeout=NVIDIA_REQUEST_TIMEOUT_SECONDS,
+            **nvidia_options,
         )
 
     if provider == "gemini":
@@ -230,7 +257,10 @@ def get_chat_llm(provider: str = DEFAULT_CHAT_PROVIDER) -> BaseChatModel:
 
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        return ChatGoogleGenerativeAI(model=DEFAULT_GEMINI_MODEL, temperature=0)
+        kwargs = {"model": DEFAULT_GEMINI_MODEL, "temperature": 0}
+        if max_tokens is not None:
+            kwargs["max_output_tokens"] = max_tokens
+        return ChatGoogleGenerativeAI(**kwargs)
 
     if provider == "openai":
         if not os.getenv("OPENAI_API_KEY"):
@@ -241,15 +271,15 @@ def get_chat_llm(provider: str = DEFAULT_CHAT_PROVIDER) -> BaseChatModel:
 
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        return ChatOpenAI(model="gpt-4o-mini", temperature=0, max_tokens=max_tokens)
 
     raise ValueError(f"Unsupported chat LLM provider: {provider}")
 
 
-def get_default_llm() -> BaseChatModel:
+def get_default_llm(*, max_tokens: int | None = None) -> BaseChatModel:
     """Return the default chat model used for retrieval QA."""
 
-    return get_chat_llm()
+    return get_chat_llm(max_tokens=max_tokens)
 
 
 def condense_question(question: str, chat_history: str) -> str:
@@ -279,6 +309,12 @@ def _k_per_source_for_question(question: str, normal_k: int) -> int:
     return normal_k
 
 
+def _max_tokens_for_question(question: str) -> int | None:
+    """Bound long list/summary generations, where small models can loop."""
+
+    return SUMMARY_MAX_TOKENS if ENUMERATION_QUERY_PATTERN.search(question) else None
+
+
 def answer_question(
     question: str,
     *,
@@ -303,7 +339,9 @@ def answer_question(
             retrieved_sources=[],
         )
 
-    chain = QA_PROMPT | (llm or get_default_llm())
+    chain = QA_PROMPT | (
+        llm or get_default_llm(max_tokens=_max_tokens_for_question(standalone_question))
+    )
     response = chain.invoke(
         {
             "question": question,

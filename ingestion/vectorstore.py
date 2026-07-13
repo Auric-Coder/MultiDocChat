@@ -6,7 +6,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, Optional, TypeVar
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -15,6 +15,13 @@ from langchain_core.documents import Document
 EMBEDDING_PROVIDER = "local"
 LOCAL_PERSIST_ROOT = "chroma_db_local"
 DEFAULT_COLLECTION_NAME = "multidocchat"
+# Chroma returns L2 distance from ``similarity_search_with_score``: lower is
+# more relevant.  Keep matches relative to the best distance instead of using
+# an embedding-model-specific absolute cutoff.
+RELATIVE_DISTANCE_MARGIN = 1.5
+RETRIEVAL_DISTANCE_METADATA_KEY = "retrieval_distance"
+
+T = TypeVar("T")
 
 _VECTOR_STORE: Optional[Chroma] = None
 
@@ -179,11 +186,37 @@ def similarity_search(query: str, *, k: int = 4) -> list[Document]:
     return get_vector_store().similarity_search(query, k=k)
 
 
-def get_retriever_per_source(k_per_source: int = 5) -> Callable[[str], list[Document]]:
-    """Retrieve top chunks independently from each source file, then merge.
+def filter_by_relative_relevance(
+    results: list[tuple[T, float]],
+    *,
+    margin: float = RELATIVE_DISTANCE_MARGIN,
+) -> list[tuple[T, float]]:
+    """Keep L2-distance matches within ``margin`` of the query's best match."""
+
+    if not results:
+        return results
+    if margin < 1:
+        raise ValueError("margin must be at least 1")
+
+    best_distance = min(score for _, score in results)
+    return [
+        (item, score)
+        for item, score in results
+        if score <= best_distance * margin
+    ]
+
+
+def get_retriever_per_source(
+    k_per_source: int = 5,
+    *,
+    relative_distance_margin: float = RELATIVE_DISTANCE_MARGIN,
+) -> Callable[[str], list[Document]]:
+    """Retrieve sufficiently relevant top chunks independently per source.
 
     Querying every source separately prevents a file with many chunks from
-    crowding smaller uploaded files out of a single global top-k result.
+    crowding smaller uploaded files out of a single global top-k result. Weak
+    chunks are then filtered against the best L2 distance for the whole query,
+    so an unrelated file does not contribute merely because it has a top-k hit.
     """
 
     vector_store = get_vector_store()
@@ -198,14 +231,24 @@ def get_retriever_per_source(k_per_source: int = 5) -> Callable[[str], list[Docu
 
     def retrieve(query: str) -> list[Document]:
         merged: list[Document] = []
+        scored_results: list[tuple[Document, float]] = []
         for source in source_files:
-            merged.extend(
-                vector_store.similarity_search(
-                    query,
-                    k=k_per_source,
-                    filter={"source_file": source},
-                )
-            )
+            if hasattr(vector_store, "similarity_search_with_score"):
+                scored_results.extend(vector_store.similarity_search_with_score(
+                    query, k=k_per_source, filter={"source_file": source}
+                ))
+            else:
+                # Compatibility for older stores and lightweight test doubles.
+                merged.extend(vector_store.similarity_search(
+                    query, k=k_per_source, filter={"source_file": source}
+                ))
+
+        for document, distance in filter_by_relative_relevance(
+            scored_results, margin=relative_distance_margin
+        ):
+            metadata = dict(document.metadata)
+            metadata[RETRIEVAL_DISTANCE_METADATA_KEY] = float(distance)
+            merged.append(Document(page_content=document.page_content, metadata=metadata))
         return merged
 
     return retrieve

@@ -51,3 +51,15 @@ class ConflictDetectionTest(TestCase):
 
         self.assertFalse(result.checked)
         factory.assert_not_called()
+
+    def test_low_relevance_cross_file_chunk_does_not_trigger_check(self):
+        sources = [
+            SourceExcerpt("policy.txt", "chunk 1", "one-1", "The limit is $100 per month.", 1.5),
+            SourceExcerpt("unrelated.txt", "chunk 1", "two-1", "The limit is $150 per month.", 3.0),
+        ]
+
+        with patch("chains.qa_chain.get_chat_llm") as factory:
+            result = detect_conflict("What is the monthly limit?", sources)
+
+        self.assertFalse(result.checked)
+        factory.assert_not_called()
