@@ -1,101 +1,152 @@
 # MultiDocChat
 
-MultiDocChat is a Streamlit app for chatting with multiple documents.
+MultiDocChat is a Streamlit retrieval-augmented generation (RAG) app for asking
+grounded questions across multiple uploaded documents. It accepts PDF, DOCX,
+plain-text, and Markdown files, answers with source attribution, keeps a short
+conversation history for follow-up questions, and warns when sources disagree.
 
-## Phase 1
+## Problem statement
 
-This phase provides the initial ingestion pipeline:
+Information is often spread across several documents: for example, a policy may
+have multiple versions, while supporting details live in a separate brief or
+resume. Reading each file manually is slow, and a general chat model can invent
+answers when it is not constrained by the source material.
 
-- Streamlit entry point with an upload widget and chat input
-- File dispatch for `.pdf`, `.docx`, `.txt`, and `.md`
-- Chunking with LangChain's `RecursiveCharacterTextSplitter`
-- Attribution metadata on every chunk, including `source_file`, `chunk_id`,
-  and either `page_number` for PDFs or `section_heading` where headings can be
-  detected
-- Central embedding factory using local embeddings by default
+MultiDocChat indexes an uploaded document set and retrieves the most relevant
+passages for each question. The chat model is instructed to use that evidence,
+cite it inline, and surface a separate warning when the retrieved sources make
+conflicting claims.
 
-## Phase 2
+## Architecture
 
-This phase adds local ChromaDB retrieval:
+The application uses LangChain to coordinate loading, chunking, retrieval, and
+chat generation. Streamlit provides the upload and chat UI.
 
-- Upload batches are embedded with
-  `sentence-transformers/all-MiniLM-L6-v2` through `get_embedding_function("local")`
-- Chroma persist directories include the provider name (`chroma_db_local`) so local
-  384-dimensional MiniLM vectors stay physically separate from future OpenAI vectors
-- The Streamlit app creates a fresh temporary local Chroma store whenever the upload
-  batch changes
-- `ingestion.vectorstore.get_retriever(k=4)` exposes the active retriever for later
-  chains
-- Chat input currently runs a manual similarity search and displays relevant chunks
-  with source metadata
-
-## Phase 3
-
-This phase adds retrieval QA with source attribution:
-
-- Chat questions retrieve the top matching Chroma chunks and pass them to a custom
-  QA prompt labeled by `source_file` and page or section metadata
-- The model is instructed to answer only from the provided excerpts and cite each
-  factual statement inline as `[filename — section/page]`
-- Inline citations are parsed back into structured source records
-- The Streamlit response includes an expandable Sources panel with the exact file,
-  page or section, chunk ID, and excerpt text used for the answer
-
-## Phase 4
-
-This phase checks for conflicting claims across uploaded files. It first uses a
-local, conservative signal (shared topic with different numeric values or
-opposing negation) so the secondary LLM comparison is not run on every
-multi-file query. When triggered, the comparison uses the same
-`get_chat_llm(provider="gemini")` factory as QA and Streamlit shows a distinct
-`⚠️ Sources disagree` callout with each source's position.
-
-Run the focused no-network test with:
-
-```bash
-python -m unittest discover -s tests -v
+```mermaid
+flowchart LR
+    U["Upload PDF, DOCX, TXT, or MD"] --> L["Load and chunk documents"]
+    L --> E["Local embeddings\nsentence-transformers/all-MiniLM-L6-v2"]
+    E --> V["Per-session temporary ChromaDB collection"]
+    Q["User question and recent chat history"] --> R["Rewrite follow-up and retrieve\nrelevant chunks per source"]
+    V --> R
+    R --> C["Conflict detection"]
+    R --> N["NVIDIA NIM\nmeta/llama-3.1-8b-instruct"]
+    C --> S["Streamlit answer, citations,\nand conflict warning"]
+    N --> S
 ```
 
-## Phase 5
+### Components
 
-- Completed question/answer exchanges are held in `st.session_state` as a
-  six-turn window and reset whenever the uploaded document set changes.
-- Before retrieval, follow-up questions are rewritten to standalone search
-  queries using `get_chat_llm(provider="nvidia")`; the answer prompt still
-  receives only the documents retrieved by that rewritten query.
+| Concern | Implementation |
+|---|---|
+| Framework and UI | LangChain + Streamlit |
+| Embeddings | Local `sentence-transformers/all-MiniLM-L6-v2` (MiniLM) |
+| Vector store | ChromaDB via `langchain-chroma` |
+| Chat model | NVIDIA NIM `meta/llama-3.1-8b-instruct` |
+| Supported inputs | PDF, DOCX, TXT, Markdown |
+| Evidence handling | Chunk metadata preserves filename, chunk ID, and page or section where available |
 
-## Run
+Embeddings run locally; the NVIDIA API key is required only for chat generation,
+follow-up-question rewriting, and the LLM-assisted conflict comparison. A new
+temporary Chroma collection is created when the upload batch changes, so one
+document set is not mixed with another.
 
-Use the existing `launchpad` Conda environment. It already contains the heavy ML
-packages used by local embeddings (`torch`, `transformers`, and
-`sentence-transformers`), so do not reinstall them for this project.
+## Setup
 
-```bash
+### Prerequisites
+
+- Conda, with the existing `launchpad` environment available.
+- An NVIDIA NIM API key from [NVIDIA Build](https://build.nvidia.com/). Use a
+  personal account if an institutional account has no NIM quota.
+
+The shared `launchpad` environment already includes the heavier local embedding
+dependencies: `torch`, `transformers`, and `sentence-transformers`. Reuse it;
+do not reinstall those packages for this project.
+
+### Install
+
+```powershell
 conda activate launchpad
 cd "D:\Launchpad project\multidocchat"
 pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-Optional one-time version check:
+Open `.env` and set the required key:
 
-```bash
-pip show sentence-transformers transformers torch
+```dotenv
+NVIDIA_API_KEY=your_actual_nvidia_nim_key
 ```
 
-Start the app:
+`OPENAI_API_KEY` and `GOOGLE_API_KEY` are included as placeholders for future
+provider experiments; they are not needed for the current Phase 8 stack.
+`.env` is intentionally ignored by Git, while `.env.example` is tracked.
 
-```bash
+### Run
+
+```powershell
 streamlit run app.py
 ```
 
-Inspect chunk attribution before vector storage:
+Then open the local Streamlit URL, upload one or more supported files, and ask a
+question. Use the sidebar to adjust the number of retrieved chunks per file or
+to clear the current index and conversation.
 
-```bash
+### Useful commands
+
+Run the test suite:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+Inspect document chunks and their attribution metadata:
+
+```powershell
 python -m ingestion.loaders samples\example.pdf samples\notes.md samples\brief.docx
 ```
 
-Embed files into local Chroma and run a manual similarity search:
+Run the evaluation set:
 
-```bash
-python -m ingestion.vectorstore "What does the policy say about invoices?" samples\example.pdf
+```powershell
+python -m eval.run_eval
+```
+
+## Screenshot
+
+> Screenshot placeholder: add a screenshot of the Streamlit upload area, cited
+> answer, Sources expander, and conflict-warning state here.
+
+## Evaluation summary
+
+The Phase 7 baseline evaluation used local MiniLM embeddings, NVIDIA NIM
+`meta/llama-3.1-8b-instruct`, a fresh temporary Chroma collection, and the four
+sample files. Full details and the per-case scorecard are in
+[eval/eval_results.md](eval/eval_results.md).
+
+| Metric | Result |
+|---|---:|
+| Retrieval precision@k | **100% (15/15)** |
+| Full answer correctness | **60% (9/15)** |
+| Conflict-detection recall | **100% (3/3)** |
+
+Retrieval found a correct supporting chunk for every evaluated question. The
+gap in fully correct answers is therefore primarily a small-model generation
+limitation, not a retrieval failure: the 8B model sometimes reports that no
+information is available even when the right context is present. Other known
+limitations are inconsistent strict citation formatting, false-positive
+conflict triggers for unrelated retrieved topics, and occasional drift in
+ambiguous multi-turn references. See the evaluation report for examples and
+the complete methodology.
+
+## Project layout
+
+```text
+app.py                 Streamlit application
+ingestion/             File loaders, chunking, embeddings, and ChromaDB setup
+chains/                QA, citation, conflict-detection, and LLM configuration
+memory/                Session-based conversation history
+eval/                  Evaluation questions, runner, and results
+tests/                 Focused unit tests
+samples/               Demo documents
 ```
