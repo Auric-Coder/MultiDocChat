@@ -1,5 +1,15 @@
 # MultiDocChat
 
+🔗 **[Live Demo](https://multidocchats.streamlit.app/)**
+
+## Screenshots
+
+![Document upload interface](screenshots/Screenshot%202026-07-14%20123023.png)
+
+![Answer with source citations](screenshots/Screenshot%202026-07-14%20124600.png)
+
+![Conflict warning](screenshots/Screenshot%202026-07-14%20124620.png) #"D:\Launchpad project\multidocchat\screenshots\Screenshot 2026-07-14 124620.png"
+
 MultiDocChat is a Streamlit retrieval-augmented generation (RAG) app for asking
 grounded questions across multiple uploaded documents. It accepts PDF, DOCX,
 plain-text, and Markdown files, answers with source attribution, keeps a short
@@ -111,11 +121,6 @@ Run the evaluation set:
 ```powershell
 python -m eval.run_eval
 ```
-
-## Screenshot
-
-> Screenshot placeholder: add a screenshot of the Streamlit upload area, cited
-> answer, Sources expander, and conflict-warning state here.
 
 ## Evaluation summary
 
