@@ -1,0 +1,34 @@
+# MultiDocChat Centralized System Configuration
+
+api:
+  chat_provider: "nvidia"  # Options: nvidia, gemini, openai
+  nvidia_model: "meta/llama-3.1-8b-instruct"
+  gemini_model: "gemini-2.0-flash"
+  openai_model: "gpt-4o-mini"
+  timeout_seconds: 120
+  frequency_penalty: 0.5
+
+document_processing:
+  chunk_size: 900
+  chunk_overlap: 125
+  supported_extensions: [".pdf", ".docx", ".txt", ".md"]
+
+vector_db:
+  embedding_provider: "local"  # Options: local, openai
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  collection_name: "multidocchat"
+  relative_distance_margin: 1.5
+
+retrieval:
+  default_strategy: "hybrid"  # Options: semantic, keyword, hybrid
+  hybrid_alpha: 0.7  # Weight for semantic score (1 - alpha for BM25)
+  default_k_per_source: 4
+  enumeration_k_per_source: 20
+
+memory:
+  max_turns: 6
+
+interface:
+  title: "MultiDocChat"
+  caption: "Ask attributed questions across your documents and follow up in context."
+  theme: "dark"
