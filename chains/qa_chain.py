@@ -13,7 +13,12 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from ingestion.vectorstore import RETRIEVAL_DISTANCE_METADATA_KEY, get_retriever_per_source
+from ingestion.vectorstore import (
+    RETRIEVAL_DISTANCE_METADATA_KEY,
+    get_hybrid_retriever_per_source,
+    get_keyword_index,
+    get_retriever_per_source,
+)
 
 if TYPE_CHECKING:
     from chains.conflict import ConflictResult
@@ -64,6 +69,8 @@ class QAResult:
     sources: list[SourceExcerpt]
     retrieved_sources: list[SourceExcerpt]
     conflict: ConflictResult | None = None
+    confidence_score: float = 0.0
+    confidence_label: str = "Medium"
 
 
 QA_PROMPT = ChatPromptTemplate.from_messages(
@@ -315,21 +322,63 @@ def _max_tokens_for_question(question: str) -> int | None:
     return SUMMARY_MAX_TOKENS if ENUMERATION_QUERY_PATTERN.search(question) else None
 
 
+def compute_confidence(
+    answer: str,
+    sources: list[SourceExcerpt],
+    retrieved_sources: list[SourceExcerpt],
+) -> tuple[float, str]:
+    """Calculate multi-factor confidence score and label for QA response."""
+    if not retrieved_sources or "could not find" in answer.lower():
+        return 0.0, "Low"
+
+    citation_factor = 1.0 if sources else 0.5
+    distances = [
+        s.retrieval_distance for s in retrieved_sources
+        if s.retrieval_distance is not None
+    ]
+    if distances:
+        top_dist = distances[0]
+        if top_dist <= 0:
+            dist_factor = min(1.0, abs(top_dist))
+        else:
+            dist_factor = max(0.2, 1.0 - (top_dist / 3.0))
+    else:
+        dist_factor = 0.7
+
+    score = round(0.4 * citation_factor + 0.6 * dist_factor, 2)
+    if score >= 0.75:
+        label = "High"
+    elif score >= 0.5:
+        label = "Medium"
+    else:
+        label = "Low"
+
+    return score, label
+
+
 def answer_question(
     question: str,
     *,
     k: int = 8,
     llm: Optional[BaseChatModel] = None,
     chat_history: str = "",
+    strategy: str = "hybrid",
 ) -> QAResult:
     """Retrieve top chunks per source and answer with inline citations.
 
     ``k`` is the limit for each uploaded source file, not a global limit.
+    ``strategy`` controls retrieval: ``"semantic"``, ``"keyword"``, or
+    ``"hybrid"`` (default).
     """
 
     standalone_question = condense_question(question, chat_history)
     k_per_source = _k_per_source_for_question(standalone_question, k)
-    retrieve = get_retriever_per_source(k_per_source=k_per_source)
+    if strategy == "semantic" or get_keyword_index() is None:
+        retrieve = get_retriever_per_source(k_per_source=k_per_source)
+    else:
+        retrieve = get_hybrid_retriever_per_source(
+            k_per_source=k_per_source, strategy=strategy,
+        )
     docs = retrieve(standalone_question)
     retrieved_sources = [_source_from_document(doc) for doc in docs]
     if not retrieved_sources:
@@ -337,6 +386,8 @@ def answer_question(
             answer="I could not find relevant excerpts for that question.",
             sources=[],
             retrieved_sources=[],
+            confidence_score=0.0,
+            confidence_label="Low",
         )
 
     chain = QA_PROMPT | (
@@ -352,9 +403,14 @@ def answer_question(
 
     from chains.conflict import detect_conflict
 
+    cited_sources = _match_cited_sources(answer, retrieved_sources)
+    score, label = compute_confidence(answer, cited_sources, retrieved_sources)
+
     return QAResult(
         answer=answer,
-        sources=_match_cited_sources(answer, retrieved_sources),
+        sources=cited_sources,
         retrieved_sources=retrieved_sources,
         conflict=detect_conflict(standalone_question, retrieved_sources),
+        confidence_score=score,
+        confidence_label=label,
     )
