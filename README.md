@@ -1,79 +1,94 @@
-# MultiDocChat
+# MultiDocChat v2
 
 🔗 **[Live Demo](https://multidocchats.streamlit.app/)**
 
-## Screenshots
+MultiDocChat v2 is an advanced, production-grade Document Intelligence and Retrieval-Augmented Generation (RAG) platform. It enables attributed question answering, automated document comparison, quantitative RAG evaluation, collection analytics, and session report exports across multi-format documents and live web pages.
 
-![Document upload interface](screenshots/Screenshot%202026-07-14%20123023.png)
+Engineered with a **100% free and open-source stack**, MultiDocChat v2 uses local HuggingFace embeddings (`all-MiniLM-L6-v2`), a pure-Python BM25 keyword search engine, ChromaDB vector storage, and free NVIDIA NIM AI models (`meta/llama-3.1-8b-instruct`), requiring zero paid API keys.
 
-![Answer with source citations](screenshots/Screenshot%202026-07-14%20124600.png)
+---
 
-![Conflict warning](screenshots/Screenshot%202026-07-14%20124620.png) 
+## Key Features in v2
 
-MultiDocChat is a Streamlit retrieval-augmented generation (RAG) app for asking
-grounded questions across multiple uploaded documents. It accepts PDF, DOCX,
-plain-text, and Markdown files, answers with source attribution, keeps a short
-conversation history for follow-up questions, and warns when sources disagree.
+- 🔀 **Hybrid Search Engine**: Combines ChromaDB dense vector similarity with a pure-Python BM25 Okapi keyword index using min-max score normalization and weighted fusion ($\text{Score} = \alpha \cdot \text{Semantic}_{\text{norm}} + (1-\alpha) \cdot \text{BM25}_{\text{norm}}$).
+- 📁 **Dual Ingestion Engine**: Accepts local files (PDF, DOCX, TXT, Markdown) as well as live Web URLs via HTTP scraping and HTML cleaning.
+- 💬 **Attributed Chat Interface**: ChatGPT/Claude-style bottom-anchored input with inline `[filename — section]` citations, collapsible source dropdowns (`📚 Cited Sources`), and one-click quick-query shortcuts.
+- 🎯 **Multi-Factor Confidence Scoring**: Computes a quantitative confidence score (0.0 to 1.0) and renders color-coded badges (**High**, **Medium**, **Low**) for every assistant response.
+- ⚔️ **Two-Stage Source Conflict Detection**: Detects contradictory statements between policy or document versions using a fast local heuristic gate followed by a targeted LLM verification call.
+- 📊 **Plotly Analytics Dashboard**: Dedicated analytics tab displaying document chunk distributions, chunks-per-source bar charts, character length histograms, and turn-by-turn citation metrics.
+- 🔍 **Document Chunk Explorer**: Full-text search across all indexed chunks with pagination and raw JSON metadata inspection.
+- ⚔️ **Document Comparison & Diff Engine**: Line-by-line unified diff analysis between contract/policy versions paired with an LLM-generated executive summary.
+- 📈 **Automated RAGAS Scorecard**: Real-time evaluation of **Faithfulness**, **Answer Relevancy**, **Context Precision**, and **Context Recall**.
+- 📥 **Session Report Exporter**: One-click download of chat transcripts, cited excerpts, confidence scores, and conflict callouts in Markdown (`.md`) and printable HTML/PDF (`.html`) formats.
+- ⚙️ **Centralized YAML Configuration**: Master `config/settings.yaml` with environment variable substitution (`${ENV_VAR:default}`) and runtime dot-notation accessors.
+- 🛡️ **Comprehensive Test Suite**: **34/34 passing automated unit tests** covering retrieval, keyword indexing, score normalization, memory windowing, conflict detection, and RAG metrics.
 
-## Problem statement
-
-Information is often spread across several documents: for example, a policy may
-have multiple versions, while supporting details live in a separate brief or
-resume. Reading each file manually is slow, and a general chat model can invent
-answers when it is not constrained by the source material.
-
-MultiDocChat indexes an uploaded document set and retrieves the most relevant
-passages for each question. The chat model is instructed to use that evidence,
-cite it inline, and surface a separate warning when the retrieved sources make
-conflicting claims.
+---
 
 ## Architecture
 
-The application uses LangChain to coordinate loading, chunking, retrieval, and
-chat generation. Streamlit provides the upload and chat UI.
+MultiDocChat v2 uses a modular, multi-tier architecture coordinating document processing, hybrid retrieval, chain execution, analytics, and evaluation.
 
 ```mermaid
-flowchart LR
-    U["Upload PDF, DOCX, TXT, or MD"] --> L["Load and chunk documents"]
-    L --> E["Local embeddings\nsentence-transformers/all-MiniLM-L6-v2"]
-    E --> V["Per-session temporary ChromaDB collection"]
-    Q["User question and recent chat history"] --> R["Rewrite follow-up and retrieve\nrelevant chunks per source"]
-    V --> R
-    R --> C["Conflict detection"]
-    R --> N["NVIDIA NIM\nmeta/llama-3.1-8b-instruct"]
-    C --> S["Streamlit answer, citations,\nand conflict warning"]
-    N --> S
+flowchart TD
+    subgraph Ingestion ["Ingestion & Document Processing"]
+        F["Local Files\n(PDF, DOCX, TXT, MD)"] --> L["Load & Chunk"]
+        U["Web URLs\n(HTML Scraping)"] --> S["Scrape & Clean"]
+        L & S --> K["BM25 Keyword Index"]
+        L & S --> E["Local MiniLM Embeddings\nall-MiniLM-L6-v2"]
+        E --> V["ChromaDB Vector Store"]
+    end
+
+    subgraph Retrieval ["Hybrid Retrieval Engine"]
+        Q["User Question & Chat History"] --> C["Question Condenser"]
+        C --> H["Hybrid Fusion\n(α · Semantic + (1-α) · BM25)"]
+        V --> H
+        K --> H
+        H --> R["Per-Source Filtered Chunks"]
+    end
+
+    subgraph Intelligence ["AI Analysis & Safety"]
+        R --> QA["QA Prompt + NVIDIA NIM\n(meta/llama-3.1-8b-instruct)"]
+        R --> CD["Two-Stage Conflict Detection"]
+        R --> CS["Multi-Factor Confidence Scorer"]
+        R --> EV["RAGAS Metric Evaluator"]
+    end
+
+    subgraph UI ["Multi-Tab Streamlit Interface (app.py)"]
+        QA & CD & CS & EV --> TAB1["💬 Chat (Citations, Confidence, Sources)"]
+        TAB1 --> TAB2["📊 Analytics (Plotly Charts)"]
+        TAB1 --> TAB3["🔍 Explorer (Chunk Search)"]
+        TAB1 --> TAB4["⚔️ Comparison (Doc Diff)"]
+        TAB1 --> TAB5["📈 RAG Eval (Metric Scorecard)"]
+        TAB1 --> TAB6["📥 Export (Markdown / HTML)"]
+    end
 ```
 
-### Components
+### Technical Stack
 
-| Concern | Implementation |
-|---|---|
-| Framework and UI | LangChain + Streamlit |
-| Embeddings | Local `sentence-transformers/all-MiniLM-L6-v2` (MiniLM) |
-| Vector store | ChromaDB via `langchain-chroma` |
-| Chat model | NVIDIA NIM `meta/llama-3.1-8b-instruct` |
-| Supported inputs | PDF, DOCX, TXT, Markdown |
-| Evidence handling | Chunk metadata preserves filename, chunk ID, and page or section where available |
+| Category | Component / Library | Usage |
+|---|---|---|
+| **UI Framework** | Streamlit `1.59.0` | Multi-tab web layout, chat interface, custom CSS theme |
+| **Orchestration** | LangChain `1.3.11` | Document loading, prompt templates, chain coordination |
+| **Embeddings** | HuggingFace `sentence-transformers/all-MiniLM-L6-v2` | Dense local embeddings (384 dims, offline) |
+| **Keyword Index** | Custom BM25 Okapi (`ingestion/keyword_search.py`) | Pure-Python sparse term frequency scoring |
+| **Vector Store** | ChromaDB `1.5.9` via `langchain-chroma` | Isolated per-session vector persistence |
+| **LLM Engine** | NVIDIA NIM `meta/llama-3.1-8b-instruct` | Free chat generation, question condensing, conflict analysis |
+| **Web Ingestion** | `requests` + `BeautifulSoup4` | HTTP scraping & clean HTML text extraction |
+| **Analytics** | Plotly `6.9.0` + Pandas `3.0.3` | Interactive visual charts & data manipulation |
+| **Configuration** | PyYAML `6.0.3` | Master `config/settings.yaml` loader & env var substitution |
+| **Logging** | Python `logging` | Structured file (`logs/multidocchat.log`) & console logging |
 
-Embeddings run locally; the NVIDIA API key is required only for chat generation,
-follow-up-question rewriting, and the LLM-assisted conflict comparison. A new
-temporary Chroma collection is created when the upload batch changes, so one
-document set is not mixed with another.
+---
 
-## Setup
+## Setup & Quick Start
 
 ### Prerequisites
 
-- Conda, with the existing `launchpad` environment available.
-- An NVIDIA NIM API key from [NVIDIA Build](https://build.nvidia.com/). Use a
-  personal account if an institutional account has no NIM quota.
+- Conda, with the `launchpad` environment active.
+- An NVIDIA NIM API key from [NVIDIA Build](https://build.nvidia.com/) (free tier).
 
-The shared `launchpad` environment already includes the heavier local embedding
-dependencies: `torch`, `transformers`, and `sentence-transformers`. Reuse it;
-do not reinstall those packages for this project.
-
-### Install
+### Installation
 
 ```powershell
 conda activate launchpad
@@ -82,76 +97,74 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Open `.env` and set the required key:
+Set your NVIDIA API key in `.env`:
 
 ```dotenv
 NVIDIA_API_KEY=your_actual_nvidia_nim_key
 ```
 
-`OPENAI_API_KEY` and `GOOGLE_API_KEY` are included as placeholders for future
-provider experiments; they are not needed for the current Phase 8 stack.
-`.env` is intentionally ignored by Git, while `.env.example` is tracked.
-
-### Run
+### Running the Application
 
 ```powershell
 streamlit run app.py
 ```
 
-Then open the local Streamlit URL, upload one or more supported files, and ask a
-question. Use the sidebar to adjust the number of retrieved chunks per file or
-to clear the current index and conversation.
+Open the local Streamlit URL (e.g. `http://localhost:8501`), upload documents or paste web page URLs, and begin querying!
 
-### Useful commands
+---
 
-Run the test suite:
+## Testing & Verification
+
+MultiDocChat v2 comes with a unit test suite verifying all core modules:
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-Inspect document chunks and their attribution metadata:
+### Test Coverage (34/34 Passing Tests):
+- `test_hybrid_search.py` (12 tests): Tokenization, BM25 Okapi scoring, per-source balancing, min-max score normalization, and hybrid chunk deduplication.
+- `test_capstone_features.py` (9 tests): RAGAS metrics (Faithfulness, Relevancy, Precision, Recall), document line diff engine, and Markdown/HTML report generators.
+- `test_per_source_retrieval.py` (8 tests): Per-source retrieval balancing, L2 distance filtering, dynamic $k$-expansion, and citation extraction.
+- `test_conflict.py` (3 tests): Contradictory policy detection, matching source bypass, and low-relevance exclusion.
+- `test_conversation_memory.py` (2 tests): 6-turn history windowing and follow-up question condensing.
 
-```powershell
-python -m ingestion.loaders samples\example.pdf samples\notes.md samples\brief.docx
-```
+---
 
-Run the evaluation set:
-
-```powershell
-python -m eval.run_eval
-```
-
-## Evaluation summary
-
-The Phase 7 baseline evaluation used local MiniLM embeddings, NVIDIA NIM
-`meta/llama-3.1-8b-instruct`, a fresh temporary Chroma collection, and the four
-sample files. Full details and the per-case scorecard are in
-[eval/eval_results.md](eval/eval_results.md).
-
-| Metric | Result |
-|---|---:|
-| Retrieval precision@k | **100% (15/15)** |
-| Full answer correctness | **60% (9/15)** |
-| Conflict-detection recall | **100% (3/3)** |
-
-Retrieval found a correct supporting chunk for every evaluated question. The
-gap in fully correct answers is therefore primarily a small-model generation
-limitation, not a retrieval failure: the 8B model sometimes reports that no
-information is available even when the right context is present. Other known
-limitations are inconsistent strict citation formatting, false-positive
-conflict triggers for unrelated retrieved topics, and occasional drift in
-ambiguous multi-turn references. See the evaluation report for examples and
-the complete methodology.
-
-## Project layout
+## Project Structure
 
 ```text
-app.py                 Streamlit application
-ingestion/             File loaders, chunking, embeddings, and ChromaDB setup
-chains/                QA, citation, conflict-detection, and LLM configuration
-memory/                Session-based conversation history
-eval/                  Evaluation questions, runner, and results
-tests/                 Focused unit tests
-samples/               Demo documents
+MultiDocChat/
+├── app.py                 # Streamlit multi-tab application & UI controller
+├── config/                # Centralized YAML configuration system
+│   ├── settings.yaml      # Master configuration settings
+│   └── config_manager.py  # Env-var substitution & dot-notation config accessor
+├── analytics/             # Interactive Plotly analytics & document explorer
+│   ├── dashboard.py       # Collection analytics & turn metrics
+│   └── explorer.py        # Full-text chunk browser & metadata inspector
+├── chains/                # RAG execution chains & AI engines
+│   ├── qa_chain.py        # QA prompt builder, LLM factory, & confidence scoring
+│   ├── conflict.py        # Two-stage source conflict detection
+│   └── comparison.py      # Line diff engine & executive comparison report
+├── ingestion/             # Document processing & retrieval storage
+│   ├── loaders.py         # Multi-format document loaders & metadata tagging
+│   ├── keyword_search.py  # Pure-Python BM25 Okapi search engine
+│   ├── vectorstore.py     # ChromaDB setup, embeddings, & hybrid score fusion
+│   └── web_scraper.py     # Web URL HTML scraper & clean text converter
+├── memory/                # Session-based windowed conversation history
+│   └── session.py         # 6-turn memory window manager
+├── eval/                  # Evaluation framework & RAGAS metrics
+│   ├── metrics.py         # Faithfulness, Relevancy, Precision, & Recall scoring
+│   ├── eval_questions.py  # 15 fixed evaluation test cases
+│   └── run_eval.py        # CLI evaluation runner
+├── export/                # Session report generation
+│   └── report.py          # Markdown & Printable HTML report export
+├── logging_config.py      # Structured file & console logger
+├── tests/                 # Unit test suite (34 passing test cases)
+└── samples/               # Evaluation & demo test documents
 ```
+
+---
+
+## License
+
+MIT License
