@@ -31,11 +31,11 @@ class ConflictResult:
     sources: list[SourceLike] | None = None
 
     def source_positions(self) -> list[str]:
-        """Fallback positions for the UI if the model omits its requested bullets."""
+        """Citation-bearing source positions for a detected disagreement."""
 
         grouped = group_by_source(self.sources or [])
         return [
-            f"- **{filename}**: {sources[0].excerpt[:900]}"
+            f"- [{filename} — {sources[0].location}]: {sources[0].excerpt[:900]}"
             for filename, sources in grouped.items()
             if sources
         ]
@@ -46,10 +46,12 @@ CONFLICT_PROMPT = ChatPromptTemplate.from_messages(
         (
             "system",
             "Compare the source excerpts for the user's question. Use only the "
-            "excerpts. Start with exactly `CONFLICT: YES` if they make incompatible "
+            "excerpts. Do not output your internal reasoning or thinking process. "
+            "Start with exactly `CONFLICT: YES` if they make incompatible "
             "claims, otherwise start with exactly `CONFLICT: NO`. If there is a "
-            "conflict, give one concise bullet for each position and name its source "
-            "file. Do not treat complementary details as a conflict.",
+            "conflict, give one concise bullet for each position, with its source "
+            "citation in the format [filename — section/page]. Do not treat "
+            "complementary details as a conflict.",
         ),
         (
             "human",
@@ -68,20 +70,38 @@ _STOP_WORDS = {
     "and", "are", "but", "for", "from", "have", "must", "not", "that",
     "the", "this", "with", "will", "your", "you", "may", "shall", "than",
 }
+_THINKING_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+_CONFLICT_STATUS_RE = re.compile(r"^\s*CONFLICT:\s*(YES|NO)\b", re.IGNORECASE | re.MULTILINE)
+CONFLICT_MAX_TOKENS = 320
+
+
+def _strip_thinking(text: str) -> str:
+    """Return only the answer portion of model output with reasoning removed."""
+
+    cleaned = _THINKING_BLOCK_RE.sub("", text)
+    if "</think>" in cleaned.lower():
+        closing = cleaned.lower().rfind("</think>")
+        return cleaned[closing + len("</think>"):].lstrip()
+    if cleaned.lstrip().lower().startswith("<think>"):
+        return ""
+    return cleaned
 
 
 def _message_content(response: BaseMessage | str) -> str:
     if isinstance(response, str):
-        return response
+        return _strip_thinking(response)
     if isinstance(response.content, str):
-        return response.content
+        return _strip_thinking(response.content)
     if isinstance(response.content, list):
-        return "\n".join(
+        return _strip_thinking("\n".join(
             item if isinstance(item, str) else item.get("text", "")
             for item in response.content
-            if isinstance(item, str) or isinstance(item, dict)
-        )
-    return str(response.content)
+            if isinstance(item, str) or (
+                isinstance(item, dict)
+                and item.get("type") not in {"reasoning", "thinking"}
+            )
+        ))
+    return _strip_thinking(str(response.content))
 
 
 def group_by_source(sources: Iterable[SourceLike]) -> dict[str, list[SourceLike]]:
@@ -157,9 +177,19 @@ def _has_disagreement_signal(grouped: dict[str, list[SourceLike]]) -> bool:
             if len(left_terms & _terms(right)) < 2:
                 continue
             right_contexts = _numeric_contexts(right)
-            for shape in left_contexts.keys() & right_contexts.keys():
-                if left_contexts[shape] != right_contexts[shape]:
-                    return True
+            for left_shape, left_values in left_contexts.items():
+                left_context_terms = _terms(_NUMBER_PATTERN.sub("", left_shape))
+                for right_shape, right_values in right_contexts.items():
+                    right_context_terms = _terms(_NUMBER_PATTERN.sub("", right_shape))
+                    # Equivalent policy wording often differs slightly between
+                    # document versions. A shared topic plus different values is
+                    # enough to ask the LLM verifier; it still decides whether
+                    # the values are truly incompatible.
+                    if (
+                        len(left_context_terms & right_context_terms) >= 2
+                        and left_values != right_values
+                    ):
+                        return True
             if left_negated != bool(_NEGATION_PATTERN.search(right)):
                 return True
     return False
@@ -200,11 +230,18 @@ def detect_conflict(question: str, sources: list[SourceLike]) -> ConflictResult:
         question=question,
         excerpts=_format_excerpts(grouped),
     )
-    response = get_chat_llm().invoke(messages)
+    response = get_chat_llm(max_tokens=CONFLICT_MAX_TOKENS).invoke(messages)
     summary = _message_content(response).strip()
-    has_conflict = not summary.upper().startswith("CONFLICT: NO")
-    if summary.upper().startswith("CONFLICT: YES"):
-        summary = summary.split("\n", 1)[1].strip() if "\n" in summary else ""
+    status = _CONFLICT_STATUS_RE.search(summary)
+    has_conflict = bool(status and status.group(1).upper() == "YES")
+    if status:
+        summary = summary[status.end():].lstrip(" \t\r\n-:")
+    if has_conflict:
+        citations = "\n".join(
+            ConflictResult(checked=True, has_conflict=True, sources=sources).source_positions()
+        )
+        if citations:
+            summary = f"{summary}\n\nSources:\n{citations}".strip()
 
     return ConflictResult(
         checked=True,

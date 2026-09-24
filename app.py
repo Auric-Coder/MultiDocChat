@@ -334,16 +334,16 @@ with tab_chat:
         # --- Quick Query Buttons (B3) ---
         col_q1, col_q2, col_q3, col_q4 = st.columns(4)
         with col_q1:
-            if st.button("📋 Summarize All", use_container_width=True):
+            if st.button("📋 Summarize All", width="stretch"):
                 quick_prompt = "Summarize all the uploaded documents concisely."
         with col_q2:
-            if st.button("🔑 Key Points", use_container_width=True):
+            if st.button("🔑 Key Points", width="stretch"):
                 quick_prompt = "What are the main key points across all documents?"
         with col_q3:
-            if st.button("📈 Main Topics", use_container_width=True):
+            if st.button("📈 Main Topics", width="stretch"):
                 quick_prompt = "List the primary topics covered in these documents."
         with col_q4:
-            if st.button("💡 Key Insights", use_container_width=True):
+            if st.button("💡 Key Insights", width="stretch"):
                 quick_prompt = "What are the most important insights or takeaways?"
 
     # --- Conversation History ---
@@ -473,7 +473,7 @@ with tab_eval:
 
         import pandas as pd
         df_eval = pd.DataFrame(eval_records)
-        st.dataframe(df_eval, use_container_width=True)
+        st.dataframe(df_eval, width="stretch")
 
 with tab_export:
     st.subheader("Export Session Report", anchor=False)
@@ -496,7 +496,7 @@ with tab_export:
                 data=md_report,
                 file_name="multidocchat_report.md",
                 mime="text/markdown",
-                use_container_width=True,
+                width="stretch",
             )
         with col_ex2:
             st.download_button(
@@ -504,7 +504,7 @@ with tab_export:
                 data=html_report,
                 file_name="multidocchat_report.html",
                 mime="text/html",
-                use_container_width=True,
+                width="stretch",
             )
 
         with st.expander("📄 Report Preview"):

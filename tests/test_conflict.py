@@ -23,6 +23,27 @@ class _FakeNvidia:
 
 
 class ConflictDetectionTest(TestCase):
+    def test_conflicting_values_with_reworded_policy_text_trigger_check(self):
+        sources = [
+            SourceExcerpt(
+                "policy_2025.txt", "chunk 1", "one-1",
+                "Home internet reimbursement is limited to $100 each month.",
+            ),
+            SourceExcerpt(
+                "policy_2026.txt", "chunk 1", "two-1",
+                "Employees may receive $150 monthly for home internet service.",
+            ),
+        ]
+
+        with patch("chains.qa_chain.get_chat_llm", return_value=_FakeNvidia()) as factory:
+            result = detect_conflict("What is the monthly internet reimbursement?", sources)
+
+        self.assertTrue(result.checked)
+        self.assertTrue(result.has_conflict)
+        factory.assert_called_once()
+        self.assertIn("[policy_2025.txt — chunk 1]", result.summary)
+        self.assertIn("[policy_2026.txt — chunk 1]", result.summary)
+
     def test_contradictory_policy_files_trigger_nvidia_conflict_call(self):
         root = Path(__file__).resolve().parents[1]
         sources = [
@@ -36,7 +57,7 @@ class ConflictDetectionTest(TestCase):
 
         self.assertTrue(result.checked)
         self.assertTrue(result.has_conflict)
-        self.assertEqual(factory.call_args.kwargs, {})
+        self.assertEqual(factory.call_args.kwargs, {"max_tokens": 320})
         self.assertIn("policy_2025.txt", result.summary)
         self.assertIn("policy_2026.txt", result.summary)
 

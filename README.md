@@ -4,7 +4,7 @@
 
 MultiDocChat v2 is an advanced, production-grade Document Intelligence and Retrieval-Augmented Generation (RAG) platform. It enables attributed question answering, automated document comparison, quantitative RAG evaluation, collection analytics, and session report exports across multi-format documents and live web pages.
 
-Engineered with a **100% free and open-source stack**, MultiDocChat v2 uses local HuggingFace embeddings (`all-MiniLM-L6-v2`), a pure-Python BM25 keyword search engine, ChromaDB vector storage, and free NVIDIA NIM AI models (`meta/llama-3.1-8b-instruct`), requiring zero paid API keys.
+Engineered with a **100% free and open-source stack**, MultiDocChat v2 uses local HuggingFace embeddings (`all-MiniLM-L6-v2`), a pure-Python BM25 keyword search engine, ChromaDB vector storage, and a centrally configured NVIDIA NIM chat model, requiring zero paid API keys.
 
 ---
 
@@ -48,7 +48,7 @@ flowchart TD
     end
 
     subgraph Intelligence ["AI Analysis & Safety"]
-        R --> QA["QA Prompt + NVIDIA NIM\n(meta/llama-3.1-8b-instruct)"]
+        R --> QA["QA Prompt + NVIDIA NIM"]
         R --> CD["Two-Stage Conflict Detection"]
         R --> CS["Multi-Factor Confidence Scorer"]
         R --> EV["RAGAS Metric Evaluator"]
@@ -73,7 +73,7 @@ flowchart TD
 | **Embeddings** | HuggingFace `sentence-transformers/all-MiniLM-L6-v2` | Dense local embeddings (384 dims, offline) |
 | **Keyword Index** | Custom BM25 Okapi (`ingestion/keyword_search.py`) | Pure-Python sparse term frequency scoring |
 | **Vector Store** | ChromaDB `1.5.9` via `langchain-chroma` | Isolated per-session vector persistence |
-| **LLM Engine** | NVIDIA NIM `meta/llama-3.1-8b-instruct` | Free chat generation, question condensing, conflict analysis |
+| **LLM Engine** | NVIDIA NIM `nvidia/nemotron-3-super-120b-a12b` (set in `chains/qa_chain.py`) | Chat generation, question condensing, conflict analysis |
 | **Web Ingestion** | `requests` + `BeautifulSoup4` | HTTP scraping & clean HTML text extraction |
 | **Analytics** | Plotly `6.9.0` + Pandas `3.0.3` | Interactive visual charts & data manipulation |
 | **Configuration** | PyYAML `6.0.3` | Master `config/settings.yaml` loader & env var substitution |
@@ -102,6 +102,16 @@ Set your NVIDIA API key in `.env`:
 ```dotenv
 NVIDIA_API_KEY=your_actual_nvidia_nim_key
 ```
+
+Optional NVIDIA settings in `.env`:
+
+```dotenv
+# Keep TLS verification on. On a managed/TLS-inspected network, set this to your CA
+# bundle path; use false only if that certificate cannot be installed.
+NVIDIA_SSL_VERIFY=true
+```
+
+> **Troubleshooting:** NVIDIA's free hosted tier is occasionally slow or returns `503 Service temporarily overloaded`. Requests time out after 45 s and are retried up to 4 times. If chat still times out, the configured model may be unavailable (e.g. `meta/llama-3.1-8b-instruct` was retired) — change `DEFAULT_NVIDIA_MODEL` in `chains/qa_chain.py` to another model listed at `https://integrate.api.nvidia.com/v1/models`.
 
 ### Running the Application
 

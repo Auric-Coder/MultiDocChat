@@ -97,7 +97,7 @@ def render_analytics_dashboard(
             color_discrete_sequence=[THEME_COLORS["primary"]],
         )
         _apply_chart_layout(fig_bar, "Chunks Per Source Document")
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, width="stretch")
 
     # --- Chart 2: Chunk Length Distribution ---
     chunk_lengths = [len(chunk.page_content) for chunk in chunks]
@@ -111,7 +111,7 @@ def render_analytics_dashboard(
             color_discrete_sequence=[THEME_COLORS["secondary"]],
         )
         _apply_chart_layout(fig_hist, "Chunk Size Distribution (Chars)")
-        st.plotly_chart(fig_hist, use_container_width=True)
+        st.plotly_chart(fig_hist, width="stretch")
 
     # --- Section: Query & Citation Analytics ---
     if conversation_turns and response_details:
@@ -144,4 +144,4 @@ def render_analytics_dashboard(
             hover_data=["Question"],
         )
         _apply_chart_layout(fig_turns, "Citations Per Conversation Turn")
-        st.plotly_chart(fig_turns, use_container_width=True)
+        st.plotly_chart(fig_turns, width="stretch")

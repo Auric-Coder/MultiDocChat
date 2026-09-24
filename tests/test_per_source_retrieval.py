@@ -109,8 +109,8 @@ class PerSourceRetrievalTest(TestCase):
         retriever.assert_called_once_with(k_per_source=20)
 
     def test_summary_query_has_a_shorter_output_cap(self):
-        self.assertEqual(_max_tokens_for_question("Summarize all documents."), 700)
-        self.assertIsNone(_max_tokens_for_question("Who is the candidate?"))
+        self.assertEqual(_max_tokens_for_question("Summarize all documents."), 512)
+        self.assertEqual(_max_tokens_for_question("Who is the candidate?"), 384)
 
     def test_qa_prompt_instructs_file_level_source_deduplication(self):
         system_message = QA_PROMPT.messages[0].prompt.template

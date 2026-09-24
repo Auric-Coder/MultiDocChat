@@ -71,7 +71,7 @@ class ConversationMemoryTest(TestCase):
                         "What about the second one?", chat_history=history, llm=answer_llm
                     )
 
-        factory.assert_called_once_with()
+        factory.assert_called_once_with(max_tokens=96)
         retriever.assert_called_once_with(k_per_source=8)
         self.assertEqual(
             retrieved_queries, ["What is the second qualification listed for Ada?"]

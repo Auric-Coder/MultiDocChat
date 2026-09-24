@@ -40,7 +40,7 @@ def get_embedding_function(provider="local"):
     retrieval code.
     """
     if provider == "local":
-        from langchain_community.embeddings import HuggingFaceEmbeddings
+        from langchain_huggingface import HuggingFaceEmbeddings
 
         return HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
